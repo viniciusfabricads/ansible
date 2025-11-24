@@ -47,29 +47,18 @@
         state: present
       register: subnet_result
 
-    - name: Criar Route Table e Associar à Sub-rede
+    - name: Criar Route Table, Adicionar Rota para IGW e Associar à Sub-rede
       amazon.aws.ec2_vpc_route_table:
         vpc_id: "{{ vpc_id }}"
         name: "{{ nome_rt }}"
+        subnets:
+          - "{{ subnet_result.subnet.id }}"  # Associa à sub-rede
+        routes:
+          - dest: "0.0.0.0/0"
+            gateway_id: "{{ igw_result.gateway_id }}"  # Rota default para IGW
         region: "{{ regiao }}"
         state: present
       register: rt_result
-
-    - name: Adicionar Rota Default para IGW na Route Table
-      amazon.aws.ec2_vpc_route:
-        route_table_id: "{{ rt_result.route_tables[0].id }}"
-        destination_cidr_block: "0.0.0.0/0"
-        gateway_id: "{{ igw_result.gateway_id }}"
-        region: "{{ regiao }}"
-        state: present
-
-    - name: Associar Route Table à Sub-rede
-      amazon.aws.ec2_vpc_subnet:
-        vpc_id: "{{ vpc_id }}"
-        subnet_id: "{{ subnet_result.subnet.id }}"
-        route_table: "{{ rt_result.route_tables[0].id }}"
-        region: "{{ regiao }}"
-        state: present
 
     - name: Criar Security Group para SSH
       amazon.aws.ec2_group:
@@ -91,14 +80,14 @@
         region: "{{ regiao }}"
         state: present
       register: key_result
-      # A chave privada é salva em files/ se não existir; baixe manualmente se precisar
+      # Chave privada salva em files/ se gerada; baixe para ~/.ssh/
 
     - name: Lançar Instância EC2
       amazon.aws.ec2_instance:
         name: "{{ nome_instancia }}"
         key_name: "{{ nome_key }}"
         instance_type: "{{ tipo_instancia }}"
-        security_group: "{{ nome_sg }}"
+        security_groups: "{{ sg_result.group_name }}"  # Usa nome do SG
         image_id: "resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"  # Latest AL2 via SSM
         network:
           vpc_id: "{{ vpc_id }}"
@@ -116,14 +105,10 @@
           Demo Concluída! Infra provisionada na AWS:
           - VPC ID: {{ vpc_id }}
           - Sub-rede ID: {{ subnet_result.subnet.id }}
+          - Route Table ID: {{ rt_result.route_tables[0].id if rt_result.route_tables else 'N/A' }}
           - SG ID: {{ sg_result.group_id }}
           - Key Pair: {{ nome_key }} (chave privada em {{ key_result.private_key_out }} se gerada)
           - EC2 ID: {{ ec2_result.instances[0].instance_id }}
           - IP Público: {{ ec2_result.instances[0].public_ip_address }}
           Para SSH: ssh -i {{ nome_key }}.pem ec2-user@{{ ec2_result.instances[0].public_ip_address }}
           Verifique no Console AWS: EC2 > Instances/VPCs.
-
-# Para Cleanup (rode separadamente com state: absent em tasks relevantes)
-# - name: Destruir Recursos
-#   amazon.aws.ec2_instance: ... state: absent
-#   (Repita para VPC, etc.)
