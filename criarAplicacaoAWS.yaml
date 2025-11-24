@@ -1,0 +1,106 @@
+---
+- name: Provisionar infraestrutura AWS e implantar app web
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    aws_region: us-east-2  # Ajuste para sua região
+    instance_type: t2.micro
+    ami_id: ami-0abcdef1234567890  # AMI Amazon Linux 2 (verifique na sua região)
+    key_name: minha-chave-ssh  # Nome da chave EC2
+    security_group_name: web-app-sg
+    app_content: |
+      <html><body><h1>Olá! Aplicação web implantada via Ansible na AWS!</h1></body></html>
+
+  tasks:
+    - name: Criar Security Group para HTTP e SSH
+      amazon.aws.ec2_group:
+        name: "{{ security_group_name }}"
+        description: Security group para app web
+        region: "{{ aws_region }}"
+        rules:
+          - proto: tcp
+            from_port: 80
+            to_port: 80
+            cidr_ip: 0.0.0.0/0  # Permite HTTP de qualquer IP (ajuste para produção)
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: 0.0.0.0/0  # Permite SSH (ajuste para seu IP)
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+      register: sg
+
+    - name: Lançar instância EC2
+      amazon.aws.ec2_instance:
+        name: "minha-app-web"
+        instance_type: "{{ instance_type }}"
+        image_id: "{{ ami_id }}"
+        region: "{{ aws_region }}"
+        key_name: "{{ key_name }}"
+        security_group: "{{ sg.group_id }}"
+        wait: yes
+        count: 1
+        network:
+          assign_public_ip: yes
+        tags:
+          Environment: dev
+      register: ec2
+
+    - name: Adicionar instância ao grupo de hosts dinâmico
+      add_host:
+        name: "{{ item.public_ip_address }}"
+        groups: launched
+        ansible_user: ec2-user  # Usuário padrão do Amazon Linux
+        ansible_ssh_private_key_file: ~/.ssh/minha-chave-ssh.pem  # Caminho para sua chave privada
+        instance_id: "{{ item.instance_id }}"
+      loop: "{{ ec2.instances }}"
+
+- name: Configurar aplicação web na EC2
+  hosts: launched
+  become: yes
+  gather_facts: yes
+  tasks:
+    - name: Atualizar pacotes
+      yum:
+        name: "*"
+        state: latest
+
+    - name: Instalar Apache (httpd)
+      yum:
+        name: httpd
+        state: present
+
+    - name: Iniciar e habilitar serviço Apache
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+
+    - name: Criar conteúdo da aplicação web
+      copy:
+        content: "{{ hostvars['localhost'].app_content }}"
+        dest: /var/www/html/index.html
+
+  handlers:
+    - name: Reiniciar Apache se necessário
+      service:
+        name: httpd
+        state: restarted
+
+- name: Exibir informações finais
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Mostrar IP público da instância
+      debug:
+        msg: "Acesse sua app em: http://{{ hostvars['launched'].ansible_host }}"
+
+    - name: Aguardar instância estar acessível
+      wait_for:
+        host: "{{ hostvars['launched'].ansible_host }}"
+        port: 80
+        delay: 10
+        timeout: 60
+      delegate_to: localhost
