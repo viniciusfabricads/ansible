@@ -1,5 +1,5 @@
 ---
-- name: Criar VPC, Subnet e VM básica no AWS EC2
+- name: Criar VPC, Subnet e VM básica no AWS EC2 com AMI dinâmica (us-east-2)
   hosts: localhost
   gather_facts: no
   collections:
@@ -26,10 +26,37 @@
           Name: basic-subnet
       register: subnet
 
-    - name: Lançar instância EC2 básica na subnet
+    - name: Buscar a AMI mais recente do Amazon Linux 2
+      ec2_ami_info:
+        region: us-east-2
+        owners:
+          - amazon
+        filters:
+          - name: name
+            values:
+              - amzn2-ami-hvm-*-x86_64-gp2
+          - name: architecture
+            values:
+              - x86_64
+          - name: root-device-type
+            values:
+              - ebs
+          - name: virtualization-type
+            values:
+              - hvm
+        sort:
+          - creation_date
+        sort_order: descending
+      register: al2_amis
+
+    - name: Definir variável para a AMI mais recente
+      set_fact:
+        latest_al2_ami_id: "{{ al2_amis.images[0].image_id }}"
+
+    - name: Lançar instância EC2 básica na subnet com AMI dinâmica
       ec2_instance:
         name: basic-vm
-        image_id: ami-0ff8a91507f77f867
+        image_id: "{{ latest_al2_ami_id }}"
         instance_type: t2.micro
         region: us-east-2
         vpc_subnet_id: "{{ subnet.subnet.id }}"
@@ -38,9 +65,10 @@
           Name: basic-vm
       register: ec2
 
-    - name: Mostrar IDs criados
+    - name: Mostrar IDs criados e AMI usada
       debug:
         msg: 
+          - "AMI ID usada: {{ latest_al2_ami_id }}"
           - "VPC ID: {{ vpc.vpc.id }}"
           - "Subnet ID: {{ subnet.subnet.id }}"
           - "Instância ID: {{ ec2.instances[0].instance_id }}"
