@@ -1,5 +1,5 @@
 ---
-- name: Criar VPC, Subnet e VM básica no AWS EC2 com AMI dinâmica (us-east-2)
+- name: Criar VPC, Subnet e VM básica no AWS EC2 com AMI dinâmica (us-east-2) - Filters corrigidos
   hosts: localhost
   gather_facts: no
   collections:
@@ -32,18 +32,10 @@
         owners:
           - amazon
         filters:
-          - name: name
-            values:
-              - amzn2-ami-hvm-*-x86_64-gp2
-          - name: architecture
-            values:
-              - x86_64
-          - name: root-device-type
-            values:
-              - ebs
-          - name: virtualization-type
-            values:
-              - hvm
+          name: amzn2-ami-hvm-*-x86_64-gp2
+          architecture: x86_64
+          root-device-type: ebs
+          virtualization-type: hvm
         sort:
           - creation_date
         sort_order: descending
