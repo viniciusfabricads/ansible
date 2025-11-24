@@ -1,0 +1,30 @@
+---
+- name: Provisionar VM básica (EC2) na AWS
+  hosts: localhost
+  gather_facts: false
+  vars:
+    nome_instancia: "MinhaVMDefault"  # Sobrescreva via -e
+    regiao: "us-east-1"  # Mude se necessário
+    tipo_instancia: "t3.micro"
+    ami_id: "ami-0abcdef1234567890"  # AMI Amazon Linux 2 HVM (verifique atual via AWS CLI: aws ec2 describe-images --owners amazon --filters "Name=name,Values=amzn2-ami-hvm-*-x86_64-gp2" --query 'Images[0].ImageId')
+  tasks:
+    - name: Lançar instância EC2
+      amazon.aws.ec2_instance:
+        name: "{{ nome_instancia }}"
+        key_name: "minha-chave-ssh"  # Crie uma key pair no AWS Console se não existir
+        instance_type: "{{ tipo_instancia }}"
+        security_group: "default"  # Ou crie um SG com SSH (porta 22)
+        image_id: "{{ ami_id }}"
+        region: "{{ regiao }}"
+        wait: true  # Aguarda até estar running
+        count: 1  # Uma instância
+        state: present  # Mude para 'absent' para destruir
+      register: resultado_ec2
+
+    - name: Exibir detalhes da instância
+      debug:
+        msg: |
+          Instância criada com sucesso!
+          ID: {{ resultado_ec2.instances[0].instance_id }}
+          IP Público: {{ resultado_ec2.instances[0].public_ip_address }}
+          Para SSH: ssh -i ~/.ssh/minha-chave-ssh.pem ec2-user@{{ resultado_ec2.instances[0].public_ip_address }}
