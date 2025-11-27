@@ -44,7 +44,7 @@
 
     - name: Lançar instância EC2 básica na subnet com AMI dinâmica
       ec2_instance:
-        name: basic-vm
+        name: vinicius
         image_id: "{{ latest_al2_ami_id }}"
         instance_type: t2.micro
         region: us-east-2
@@ -61,4 +61,5 @@
           - "VPC ID: {{ vpc.vpc.id }}"
           - "Subnet ID: {{ subnet.subnet.id }}"
           - "Instância ID: {{ ec2.instances[0].instance_id }}"
+
 
