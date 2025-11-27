@@ -5,10 +5,11 @@
   tasks:
     - name: Criar o usuário IAM 'exemplo-usuario'
       amazon.aws.iam_user:
-        name: exemplo-usuario
+        name: maria
         state: present
       register: resultado_criacao
 
     - name: Exibir resultado da criação
       debug:
+
         var: resultado_criacao
