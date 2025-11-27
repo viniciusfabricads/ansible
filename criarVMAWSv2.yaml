@@ -7,7 +7,7 @@
   tasks:
     - name: Criar VPC básica
       ec2_vpc_net:
-        name: basic-vpc
+        name: vinicius
         cidr_block: 10.0.0.0/16
         region: us-east-2
         state: present
@@ -61,3 +61,4 @@
           - "VPC ID: {{ vpc.vpc.id }}"
           - "Subnet ID: {{ subnet.subnet.id }}"
           - "Instância ID: {{ ec2.instances[0].instance_id }}"
+
