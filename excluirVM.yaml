@@ -1,0 +1,34 @@
+---
+- name: Excluir VM básica no AWS EC2 (us-east-2)
+  hosts: localhost
+  gather_facts: no
+  collections:
+    - amazon.aws
+  vars:
+    region: us-east-2
+    instance_tag: vinicius  # Tag Name da instância para identificação
+  tasks:
+    - name: Buscar instância EC2 pela tag
+      ec2_instance_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Name": "{{ instance_tag }}"
+      register: ec2_instances
+
+    - name: Verificar se a instância existe
+      fail:
+        msg: "Instância com tag '{{ instance_tag }}' não encontrada."
+      when: ec2_instances.instances | length == 0
+
+    - name: Excluir (terminar) instância EC2
+      ec2_instance:
+        instance_ids: "{{ ec2_instances.instances[0].instance_id }}"
+        state: absent
+        region: "{{ region }}"
+      register: ec2_terminate
+
+    - name: Mostrar resultado da exclusão
+      debug:
+        msg:
+          - "Instância ID: {{ ec2_instances.instances[0].instance_id }} terminada com sucesso."
+          - "Estado atual: {{ ec2_terminate.instances[0].state.name if ec2_terminate.instances else 'N/A' }}"
