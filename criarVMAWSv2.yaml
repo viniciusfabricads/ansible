@@ -41,7 +41,9 @@
     - name: Definir variável para a AMI mais recente (ordenada por creation_date)
       set_fact:
         latest_al2_ami_id: "{{ (al2_amis.images | sort(attribute='creation_date', reverse=true))[0].image_id }}"
-
+    - name: Definir número de vCPUs para a VM (considerando 1 vCPU)
+      set_fact:
+        vcpu_count: 1
     - name: Lançar instância EC2 básica na subnet com AMI dinâmica
       ec2_instance:
         name: vinicius
@@ -61,5 +63,6 @@
           - "VPC ID: {{ vpc.vpc.id }}"
           - "Subnet ID: {{ subnet.subnet.id }}"
           - "Instância ID: {{ ec2.instances[0].instance_id }}"
+
 
 
