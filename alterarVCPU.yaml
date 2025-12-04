@@ -1,0 +1,37 @@
+---
+- name: Alterar quantidade de vCPUs da VM básica no AWS EC2 (us-east-2)
+  hosts: localhost
+  gather_facts: no
+  collections:
+    - amazon.aws
+  vars:
+    region: us-east-2
+    instance_tag: vinicius  # Tag Name da instância para identificação
+    new_instance_type: t3.micro  # Tipo de instância com 2 vCPUs (exemplo: alterar de 1 para 2 vCPUs)
+  tasks:
+    - name: Buscar instância EC2 pela tag
+      ec2_instance_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Name": "{{ instance_tag }}"
+      register: ec2_instances
+
+    - name: Verificar se a instância existe
+      fail:
+        msg: "Instância com tag '{{ instance_tag }}' não encontrada."
+      when: ec2_instances.instances | length == 0
+
+    - name: Alterar tipo de instância para mudar vCPUs
+      ec2_instance:
+        instance_ids: "{{ ec2_instances.instances[0].instance_id }}"
+        instance_type: "{{ new_instance_type }}"
+        state: present
+        region: "{{ region }}"
+      register: ec2_modify
+
+    - name: Mostrar resultado da alteração
+      debug:
+        msg:
+          - "Instância ID: {{ ec2_instances.instances[0].instance_id }} alterada com sucesso."
+          - "Novo tipo de instância: {{ new_instance_type }} (com 2 vCPUs)."
+          - "Estado atual: {{ ec2_modify.instances[0].state.name if ec2_modify.instances else 'N/A' }}"
