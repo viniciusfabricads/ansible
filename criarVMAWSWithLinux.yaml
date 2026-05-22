@@ -1,5 +1,5 @@
 ---
-- name: Criar VPC, Subnet, Security Group, IGW e VM no AWS EC2 com usuário vinicius (us-east-2)
+- name: Criar VPC, Subnet, Security Group, IGW e VM no AWS EC2 com IP Público e usuário vinicius
   hosts: localhost
   gather_facts: no
   collections:
@@ -39,7 +39,7 @@
             ports:
               - 22
             cidr_ip: 0.0.0.0/0
-            rule_desc: "SSH from anywhere (demo only - restrinja em produção)"
+            rule_desc: "SSH from anywhere (demo only)"
       register: sg
 
     - name: Criar Internet Gateway
@@ -80,7 +80,7 @@
       set_fact:
         latest_al2_ami_id: "{{ (al2_amis.images | sort(attribute='creation_date', reverse=true))[0].image_id }}"
 
-    - name: Lançar instância EC2 com criação automática do usuário vinicius
+    - name: Lançar instância EC2 com IP Público e usuário vinicius
       ec2_instance:
         name: vinicius
         image_id: "{{ latest_al2_ami_id }}"
@@ -92,45 +92,38 @@
         state: present
         tags:
           Name: basic-vm
+        # === Garantir IP Público ===
+        network:
+          assign_public_ip: true
         user_data: |
           #!/bin/bash
-          # Executado automaticamente via user_data na primeira inicialização da instância
           set -e
-
           echo "=== Configurando usuário vinicius ==="
 
-          # Criar usuário se não existir
           if ! id vinicius &>/dev/null; then
             useradd -m -s /bin/bash vinicius
             echo "vinicius:demonstracao" | chpasswd
             usermod -aG wheel vinicius
-            echo "Usuário 'vinicius' criado com senha 'demonstracao'."
-          else
-            echo "Usuário 'vinicius' já existe."
+            echo "Usuário 'vinicius' criado com sucesso."
           fi
 
-          # Habilitar autenticação por senha no SSH (Amazon Linux 2 vem desabilitado por padrão)
+          # Habilitar login por senha no SSH
           sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config 2>/dev/null || true
-          sed -i 's/^#PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config 2>/dev/null || true
-
-          # Reiniciar SSH
-          systemctl restart sshd || service sshd restart || true
+          systemctl restart sshd || true
 
           echo "=== Configuração concluída ==="
       register: ec2
 
-    - name: Mostrar resumo da criação
+    - name: Mostrar informações da VM criada
       debug:
         msg:
-          - "AMI ID usada: {{ latest_al2_ami_id }}"
+          - "AMI ID: {{ latest_al2_ami_id }}"
           - "VPC ID: {{ vpc.vpc.id }}"
           - "Subnet ID: {{ subnet.subnet.id }}"
           - "Security Group: {{ sg.group_id }}"
-          - "Internet Gateway: {{ igw.gateway_id }}"
-          - "Route Table: {{ rt.route_table.id }}"
           - "Instância ID: {{ ec2.instances[0].instance_id }}"
-          - "IP Público: {{ ec2.instances[0].public_ip_address | default('Verifique no console AWS') }}"
+          - "IP Público: {{ ec2.instances[0].public_ip_address | default('Ainda não disponível - verifique no console AWS') }}"
           - ""
-          - "Para acessar a VM:"
-          - "ssh vinicius@<IP_PUBLICO>"
+          - ">>> Para acessar via SSH:"
+          - "ssh vinicius@{{ ec2.instances[0].public_ip_address | default('<IP_PUBLICO>') }}"
           - "Senha: demonstracao"
