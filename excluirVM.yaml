@@ -6,7 +6,7 @@
     - amazon.aws
   vars:
     region: us-east-2
-    instance_tag: vinicius-ssm  # Tag Name da instância para identificação
+    instance_tag: vinicius-ssm3  # Tag Name da instância para identificação
   tasks:
     - name: Buscar instância EC2 pela tag
       ec2_instance_info:
