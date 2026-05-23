@@ -65,15 +65,14 @@
           - "{{ instance_id }}"
       register: instance_info
 
-    - name: Associar o Security Group à instância (mantendo os já existentes)
-      ansible.builtin.command: >-
-        aws ec2 modify-instance-attribute
-        --region {{ region }}
-        --instance-id {{ instance_id }}
-        --groups {{ existing_sgs | join(' ') }} {{ sg.group_id }}
+    - name: Associar o Security Group à ENI da instância (mantendo os já existentes)
+      amazon.aws.ec2_eni:
+        eni_id: "{{ instance_info.instances[0].network_interfaces[0].network_interface_id }}"
+        region: "{{ region }}"
+        security_groups: "{{ existing_sgs + [sg.group_id] }}"
+        state: present
       vars:
         existing_sgs: "{{ instance_info.instances[0].security_groups | map(attribute='group_id') | list }}"
-      changed_when: true
 
     - name: Registrar a instância como host SSM dinamicamente (inventário embutido)
       ansible.builtin.add_host:
