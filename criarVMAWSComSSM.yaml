@@ -1,5 +1,5 @@
 ---
-- name: Criar VPC, Subnet e VM com suporte ao SSM Session Manager
+- name: Criar VPC, Subnet Pública e VM com suporte ao SSM Session Manager
   hosts: localhost
   gather_facts: false
   collections:
@@ -26,7 +26,6 @@
         create_instance_profile: true
         managed_policies:
           - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-      register: ssm_role
 
     # ========================== VPC ==========================
     - name: Criar VPC
@@ -39,6 +38,17 @@
           Name: vinicius-vpc
       register: vpc
 
+    # ========================== INTERNET GATEWAY ==========================
+    - name: Criar Internet Gateway
+      ec2_vpc_igw:
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: us-east-2
+        state: present
+        tags:
+          Name: vinicius-igw
+      register: igw
+
+    # ========================== SUBNET ==========================
     - name: Criar Subnet
       ec2_vpc_subnet:
         vpc_id: "{{ vpc.vpc.id }}"
@@ -47,11 +57,25 @@
         region: us-east-2
         state: present
         tags:
-          Name: vinicius-subnet
+          Name: vinicius-subnet-public
       register: subnet
 
+    # ========================== ROUTE TABLE + ROTA PARA INTERNET ==========================
+    - name: Criar Route Table
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: us-east-2
+        tags:
+          Name: vinicius-rt-public
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw.gateway_id }}"
+        subnets:
+          - "{{ subnet.subnet.id }}"
+      register: route_table
+
     # ========================== BUSCAR AMI ==========================
-    - name: Buscar AMI mais recente do Amazon Linux 2
+    - name: Buscar AMI Amazon Linux 2 mais recente
       ec2_ami_info:
         region: us-east-2
         owners: ["amazon"]
@@ -66,27 +90,29 @@
       set_fact:
         latest_al2_ami_id: "{{ (al2_amis.images | sort(attribute='creation_date', reverse=true))[0].image_id }}"
 
-    # ========================== CRIAR INSTÂNCIA ==========================
-    - name: Criar Instância EC2 com IAM Role para SSM
+    # ========================== CRIAR INSTÂNCIA COM IP PÚBLICO ==========================
+    - name: Criar Instância EC2 com IP Público e IAM Role SSM
       ec2_instance:
         name: vinicius-ssm
         image_id: "{{ latest_al2_ami_id }}"
         instance_type: t2.micro
         region: us-east-2
         vpc_subnet_id: "{{ subnet.subnet.id }}"
+        assign_public_ip: true                    # ← IP Público automático
         state: present
         tags:
           Name: vinicius-ssm
           Environment: Demo
-        iam_instance_profile: SSMInstanceRole          # ← ESSENCIAL para SSM
+        iam_instance_profile: SSMInstanceRole
         wait: true
       register: ec2
 
-    - name: Mostrar informações criadas
+    - name: Mostrar resumo do que foi criado
       debug:
         msg:
           - "AMI utilizada: {{ latest_al2_ami_id }}"
           - "VPC ID: {{ vpc.vpc.id }}"
           - "Subnet ID: {{ subnet.subnet.id }}"
+          - "Internet Gateway ID: {{ igw.gateway_id }}"
           - "Instância ID: {{ ec2.instances[0].instance_id }}"
-          - "IAM Role: SSMInstanceRole"
+          - "IP Público: {{ ec2.instances[0].public_ip_address | default('N/A') }}"
