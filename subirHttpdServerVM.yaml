@@ -1,6 +1,6 @@
 ---
 - name: Instalar e configurar httpd (Apache) via SSM
-  hosts: vinicius_ssm3
+  hosts: vinicius-ssm3
   gather_facts: false
   become: true
 
