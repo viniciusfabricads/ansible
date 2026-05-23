@@ -43,6 +43,17 @@
 
   tasks:
 
+    # ===== Instala a biblioteca Python faltante no EE (em runtime) =====
+    # O EE oficial traz quase todo o SDK do Azure, mas falta a
+    # azure-mgmt-hybridcompute exigida pela versão da collection.
+    # Esta task roda antes das tasks Azure e instala a lib no interpretador
+    # que o Ansible está usando (--user para não exigir permissão de root).
+    - name: Garantir a biblioteca azure-mgmt-hybridcompute
+      ansible.builtin.pip:
+        name: azure-mgmt-hybridcompute
+        extra_args: --user
+      ignore_errors: true
+
     # ========================== RESOURCE GROUP ==========================
     - name: Criar Resource Group
       azure.azcollection.azure_rm_resourcegroup:
