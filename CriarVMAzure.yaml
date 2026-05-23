@@ -3,8 +3,6 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  collections:
-    - name: azure.azcollection
 
   vars:
     # ==================== VARIÁVEIS - PERSONALIZE AQUI ====================
@@ -17,7 +15,7 @@
     subnet_address_prefix: "10.10.1.0/24"
 
     nsg_name: "nsg-fabricsds-dev"
-    
+
     # Nomes ajustados para a VM de demonstração
     public_ip_name: "pip-vinicius-demonstracao"
     nic_name: "nic-vinicius-demonstracao"
@@ -25,7 +23,7 @@
 
     vm_size: "Standard_B2s"
     admin_username: "azureuser"
-    admin_password: "SuaSenhaForte@123"        # Altere para uma senha segura
+    admin_password: "SuaSenhaForte@123"   # Altere para uma senha segura
 
     image:
       publisher: "Canonical"
