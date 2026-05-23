@@ -1,36 +1,58 @@
 ---
 # ============================================================================
-# Playbook: Instalar e subir o HTTPD na VM vinicius-ssm4 (Amazon Linux 2)
-# Conexão: SSH (sem inventory.ini separado)
+# Playbook: Instalar e subir o HTTPD na VM vinicius-ssm4 via SSM Run Command
+# Conexão: API do SSM (boto3) — SEM SSH, SEM chave, SEM session-manager-plugin
 #
-# O primeiro play descobre o IP público da instância e injeta o host
-# via add_host. O segundo play conecta via SSH e instala o HTTPD.
+# Ideal para AWX/AAP: roda inteiramente em localhost contra a API da AWS.
+# Não depende de arquivos persistentes nem de Credentials de SSH.
 #
-# Execução:
-#   ansible-playbook instalar-httpd-ssh.yaml
+# Pré-requisitos no Execution Environment do AWX:
+#   - collection community.aws e amazon.aws
+#   - boto3 / botocore (já presentes, pois os módulos AWS funcionam)
+#   - AWS Credential configurado no Job Template (chave de acesso ou role)
 #
-# Pré-requisitos na máquina de controle:
-#   - ansible-galaxy collection install amazon.aws
-#   - pip install boto3 botocore
-#   - credenciais AWS configuradas
-#   - a chave privada vinicius-key.pem acessível (ver var key_local_path)
+# Requisito na instância (já atendido):
+#   - IAM Role SSMInstanceRole com a policy AmazonSSMManagedInstanceCore
+#   - Agente SSM rodando (padrão no Amazon Linux 2)
 # ============================================================================
 
-# ========================================================================
-# PARTE 1: Descobrir o IP da instância e registrar como host SSH
-# ========================================================================
-- name: Descobrir a instância e registrar host SSH
+- name: Instalar HTTPD via SSM Run Command
   hosts: localhost
   gather_facts: false
   collections:
     - amazon.aws
+    - community.aws
   vars:
     region: us-east-2
     instance_id: i-0e26cae7240dbd2bb        # vinicius-ssm4
-    key_local_path: "./vinicius-key.pem"     # chave privada gerada na criação
-    remote_user: ec2-user                    # usuário padrão do Amazon Linux 2
+    vpc_name: vinicius-vpc
 
   tasks:
+
+    # ---- Garante que a porta 80 está liberada (para acessar a página) ----
+    - name: Buscar a VPC pelo nome
+      amazon.aws.ec2_vpc_net_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Name": "{{ vpc_name }}"
+      register: vpc_info
+
+    - name: Criar Security Group liberando HTTP (porta 80)
+      amazon.aws.ec2_security_group:
+        name: vinicius-sg-http
+        description: Libera HTTP para o servidor web
+        vpc_id: "{{ vpc_info.vpcs[0].vpc_id }}"
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            ports:
+              - 80
+            cidr_ip: 0.0.0.0/0
+            rule_desc: Permite HTTP de qualquer origem
+        tags:
+          Name: vinicius-sg-http
+      register: sg
+
     - name: Buscar dados da instância
       amazon.aws.ec2_instance_info:
         region: "{{ region }}"
@@ -38,64 +60,35 @@
           - "{{ instance_id }}"
       register: instance_info
 
-    - name: Validar que a instância tem IP público
-      ansible.builtin.assert:
-        that:
-          - instance_info.instances[0].public_ip_address is defined
-          - instance_info.instances[0].public_ip_address | length > 0
-        fail_msg: "A instância {{ instance_id }} não tem IP público. Verifique se está rodando."
-
-    - name: Registrar a instância como host SSH (inventário embutido)
-      ansible.builtin.add_host:
-        name: "{{ instance_info.instances[0].public_ip_address }}"
-        groups: vm_ssh
-        ansible_user: "{{ remote_user }}"
-        ansible_ssh_private_key_file: "{{ key_local_path }}"
-        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-    - name: Mostrar o IP descoberto
-      ansible.builtin.debug:
-        msg: "Conectando em {{ instance_info.instances[0].public_ip_address }} como {{ remote_user }}"
-
-# ========================================================================
-# PARTE 2: Instalar e iniciar o HTTPD via SSH
-# ========================================================================
-- name: Instalar e configurar HTTPD via SSH
-  hosts: vm_ssh
-  gather_facts: false
-  become: true
-
-  tasks:
-    - name: Aguardar a instância aceitar conexões SSH
-      ansible.builtin.wait_for_connection:
-        timeout: 120
-
-    - name: Instalar o pacote httpd
-      ansible.builtin.yum:
-        name: httpd
+    - name: Associar o SG de HTTP à ENI (mantendo os existentes)
+      amazon.aws.ec2_eni:
+        eni_id: "{{ instance_info.instances[0].network_interfaces[0].network_interface_id }}"
+        region: "{{ region }}"
+        security_groups: "{{ existing_sgs + [sg.group_id] }}"
         state: present
+      vars:
+        existing_sgs: "{{ instance_info.instances[0].security_groups | map(attribute='group_id') | list }}"
 
-    - name: Criar página de teste (index.html)
-      ansible.builtin.copy:
-        content: |
-          <html>
-            <head><title>vinicius-ssm4</title></head>
-            <body>
-              <h1>HTTPD instalado via Ansible + SSH</h1>
-              <p>Servidor: vinicius-ssm4</p>
-            </body>
-          </html>
-        dest: /var/www/html/index.html
-        owner: apache
-        group: apache
-        mode: '0644'
+    # ---- Instala o HTTPD enviando comandos via SSM Run Command ----
+    - name: Enviar comando de instalação do HTTPD via SSM
+      community.aws.ssm_command:
+        document_name: AWS-RunShellScript
+        region: "{{ region }}"
+        instance_ids:
+          - "{{ instance_id }}"
+        comment: "Instalar e subir o HTTPD via Ansible"
+        parameters:
+          commands:
+            - "yum install -y httpd"
+            - "echo '<html><head><title>vinicius-ssm4</title></head><body><h1>HTTPD instalado via Ansible + SSM Run Command</h1><p>Servidor: vinicius-ssm4</p></body></html>' > /var/www/html/index.html"
+            - "systemctl enable httpd"
+            - "systemctl start httpd"
+        wait: true
+      register: ssm_result
 
-    - name: Iniciar e habilitar o serviço httpd
-      ansible.builtin.service:
-        name: httpd
-        state: started
-        enabled: true
-
-    - name: Mostrar resultado
+    - name: Mostrar resultado da execução
       ansible.builtin.debug:
-        msg: "HTTPD instalado e rodando. Acesse via http://{{ inventory_hostname }}"
+        msg:
+          - "Status: {{ ssm_result.command.status | default('ver detalhes abaixo') }}"
+          - "IP Público: {{ instance_info.instances[0].public_ip_address | default('N/A') }}"
+          - "Acesse: http://{{ instance_info.instances[0].public_ip_address | default('N/A') }}"
