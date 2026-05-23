@@ -56,15 +56,24 @@
             rule_desc: Permite HTTP de qualquer origem
         tags:
           Name: vinicius-sg-http
+      register: sg
 
-    - name: Associar o Security Group à instância
-      amazon.aws.ec2_instance:
+    - name: Buscar a interface de rede (ENI) da instância
+      amazon.aws.ec2_instance_info:
+        region: "{{ region }}"
         instance_ids:
           - "{{ instance_id }}"
-        region: "{{ region }}"
-        security_groups:
-          - vinicius-sg-http
-        state: present
+      register: instance_info
+
+    - name: Associar o Security Group à instância (mantendo os já existentes)
+      ansible.builtin.command: >-
+        aws ec2 modify-instance-attribute
+        --region {{ region }}
+        --instance-id {{ instance_id }}
+        --groups {{ existing_sgs | join(' ') }} {{ sg.group_id }}
+      vars:
+        existing_sgs: "{{ instance_info.instances[0].security_groups | map(attribute='group_id') | list }}"
+      changed_when: true
 
     - name: Registrar a instância como host SSM dinamicamente (inventário embutido)
       ansible.builtin.add_host:
