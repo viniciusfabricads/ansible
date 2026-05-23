@@ -1,0 +1,93 @@
+---
+# ============================================================================
+# Playbook: Excluir a VM e recursos associados no Azure
+#
+# IMPORTANTE: na Azure, deletar só a VM deixa órfãos o disco, a NIC, o IP
+# público, o NSG e a VNet — e alguns deles (IP público, disco) continuam
+# gerando custo. Por isso, a forma mais limpa é deletar o RESOURCE GROUP
+# inteiro, que remove tudo em cascata.
+#
+# Mesmas credenciais/EE usados na criação (Azure Credential no AWX).
+# ============================================================================
+
+- name: Excluir VM e recursos no Azure
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - azure.azcollection
+
+  vars:
+    resource_group: vinicius-rg
+    vm_name: vinicius-vm
+
+  tasks:
+
+    # ===== Garante a biblioteca Python faltante no EE (igual à criação) =====
+    - name: Garantir a biblioteca azure-mgmt-hybridcompute
+      ansible.builtin.pip:
+        name: azure-mgmt-hybridcompute
+        extra_args: --user
+      ignore_errors: true
+
+    # ========================================================================
+    # OPÇÃO RECOMENDADA: deletar o Resource Group inteiro (apaga tudo dentro)
+    # ========================================================================
+    - name: Excluir o Resource Group e TODOS os recursos dentro dele
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ resource_group }}"
+        state: absent
+        force_delete_nonempty: true   # necessário para apagar RG que contém recursos
+      register: rg_delete
+
+    - name: Confirmar exclusão
+      ansible.builtin.debug:
+        msg: "Resource Group '{{ resource_group }}' e todos os seus recursos foram excluídos."
+
+    # ========================================================================
+    # OPÇÃO ALTERNATIVA (GRANULAR): apagar só a VM e seus recursos, preservando
+    # o Resource Group. Descomente o bloco abaixo e comente a OPÇÃO RECOMENDADA
+    # acima, caso queira manter o RG e a rede.
+    #
+    # A ordem importa: a VM deve ser deletada antes da NIC, e a NIC antes do
+    # IP público (dependências). O disco gerenciado é removido junto da VM
+    # apenas se remove_on_absent estiver configurado; por segurança, deletamos
+    # explicitamente os recursos de rede.
+    # ========================================================================
+    # - name: Excluir a VM
+    #   azure.azcollection.azure_rm_virtualmachine:
+    #     resource_group: "{{ resource_group }}"
+    #     name: "{{ vm_name }}"
+    #     state: absent
+    #     remove_on_absent:
+    #       - all_autocreated   # remove discos/NIC/IP criados junto da VM
+    #
+    # - name: Excluir a NIC
+    #   azure.azcollection.azure_rm_networkinterface:
+    #     resource_group: "{{ resource_group }}"
+    #     name: vinicius-nic
+    #     state: absent
+    #
+    # - name: Excluir o IP Público
+    #   azure.azcollection.azure_rm_publicipaddress:
+    #     resource_group: "{{ resource_group }}"
+    #     name: vinicius-pip
+    #     state: absent
+    #
+    # - name: Excluir o Network Security Group
+    #   azure.azcollection.azure_rm_securitygroup:
+    #     resource_group: "{{ resource_group }}"
+    #     name: vinicius-nsg
+    #     state: absent
+    #
+    # - name: Excluir a Subnet
+    #   azure.azcollection.azure_rm_subnet:
+    #     resource_group: "{{ resource_group }}"
+    #     name: vinicius-subnet
+    #     virtual_network: vinicius-vnet
+    #     state: absent
+    #
+    # - name: Excluir a Virtual Network
+    #   azure.azcollection.azure_rm_virtualnetwork:
+    #     resource_group: "{{ resource_group }}"
+    #     name: vinicius-vnet
+    #     state: absent
