@@ -28,6 +28,20 @@
         extra_args: --user
       ignore_errors: true
 
+    # ===== Remove qualquer extensão anterior com o mesmo nome =====
+    # Sem isso, o Azure considera a extensão "já aplicada" e NÃO reexecuta
+    # o script — o módulo retorna sucesso mas nada roda na VM.
+    - name: Remover extensão instalar-httpd anterior (se existir)
+      azure.azcollection.azure_rm_virtualmachineextension:
+        resource_group: "{{ resource_group }}"
+        virtual_machine_name: "{{ vm_name }}"
+        name: instalar-httpd
+        state: absent
+
+    - name: Aguardar a remoção propagar
+      ansible.builtin.pause:
+        seconds: 20
+
     # ===== Instala e sobe o Apache2 dentro da VM via extensão =====
     - name: Instalar e iniciar o Apache2 via Custom Script Extension
       azure.azcollection.azure_rm_virtualmachineextension:
@@ -58,8 +72,12 @@
         name: "{{ public_ip_name }}"
       register: pip_info
 
-    - name: Mostrar resultado
+    - name: Mostrar resultado completo da extensão (para diagnóstico)
+      ansible.builtin.debug:
+        var: ext
+
+    - name: Mostrar resumo
       ansible.builtin.debug:
         msg:
-          - "Extensão aplicada: {{ ext.state.provisioning_state | default('ver console') }}"
+          - "Extensão aplicada: {{ ext.state.provisioning_state | default('ver acima') }}"
           - "Acesse: http://{{ pip_info.publicipaddresses[0].ip_address | default('N/A') }}"
