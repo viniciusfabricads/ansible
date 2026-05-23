@@ -1,0 +1,27 @@
+# Coloque este arquivo na RAIZ do repositório (junto dos playbooks),
+# NÃO dentro da pasta collections/.
+#
+# O AWX/AAP instala estas bibliotecas Python na sincronização do Projeto.
+# Estas são as dependências da collection azure.azcollection.
+#
+# OBS: esta lista cobre os módulos usados nos playbooks (resource group,
+# rede, NSG, IP público, NIC, VM e extensão). Se algum módulo Azure
+# adicional reclamar de import, normalmente é só acrescentar o
+# pacote azure-mgmt-* correspondente.
+
+packaging
+requests[security]
+xmltodict
+msgraph-sdk==1.40.0
+msrest==0.7.1
+msrestazure==0.6.4.post1
+azure-core==1.30.0
+azure-common==1.1.28
+azure-identity==1.16.1
+azure-mgmt-core==1.4.0
+azure-mgmt-resource==23.1.1
+azure-mgmt-network==25.4.0
+azure-mgmt-compute==30.6.0
+azure-mgmt-storage==21.1.0
+azure-storage-blob==12.20.0
+azure-keyvault==4.2.0
