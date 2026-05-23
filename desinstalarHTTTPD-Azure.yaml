@@ -1,0 +1,85 @@
+---
+# ============================================================================
+# Playbook: Desinstalar o Apache2 (httpd) da VM Ubuntu do Azure
+# Conexão: API do Azure via Custom Script Extension (sem SSH, sem chave).
+#
+# Estratégia:
+#  1. Remove a extensão de INSTALAÇÃO anterior (limpa o registro).
+#  2. Aplica uma extensão de DESINSTALAÇÃO (nome próprio) que para o serviço,
+#     remove o pacote apache2 e limpa as configurações dentro da VM.
+#  3. Remove a própria extensão de desinstalação ao final, deixando a VM
+#     sem extensões órfãs.
+#
+# Mesmas credenciais/EE da criação (Azure Credential no AWX).
+# ============================================================================
+
+- name: Desinstalar Apache2 na VM Ubuntu do Azure
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - azure.azcollection
+
+  vars:
+    resource_group: vinicius-rg
+    vm_name: vinicius-vm
+
+  tasks:
+
+    # ===== Garante a biblioteca Python faltante no EE (igual à criação) =====
+    - name: Garantir a biblioteca azure-mgmt-hybridcompute
+      ansible.builtin.pip:
+        name: azure-mgmt-hybridcompute
+        extra_args: --user
+      ignore_errors: true
+
+    # ===== Remove a extensão de INSTALAÇÃO anterior (limpa o registro) =====
+    - name: Remover extensão instalar-httpd (se existir)
+      azure.azcollection.azure_rm_virtualmachineextension:
+        resource_group: "{{ resource_group }}"
+        virtual_machine_name: "{{ vm_name }}"
+        name: instalar-httpd
+        state: absent
+
+    - name: Aguardar a remoção propagar
+      ansible.builtin.pause:
+        seconds: 20
+
+    # ===== Aplica a extensão de DESINSTALAÇÃO (executa dentro da VM) =====
+    - name: Parar e remover o Apache2 via Custom Script Extension
+      azure.azcollection.azure_rm_virtualmachineextension:
+        resource_group: "{{ resource_group }}"
+        virtual_machine_name: "{{ vm_name }}"
+        name: desinstalar-httpd
+        publisher: Microsoft.Azure.Extensions
+        virtual_machine_extension_type: CustomScript
+        type_handler_version: "2.1"
+        auto_upgrade_minor_version: true
+        settings:
+          commandToExecute: >-
+            sudo systemctl stop apache2 || true &&
+            sudo systemctl disable apache2 || true &&
+            sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y apache2 apache2-utils apache2-bin apache2.2-common || true &&
+            sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y || true &&
+            sudo rm -rf /var/www/html/index.html
+        state: present
+      register: ext
+
+    - name: Mostrar resultado da desinstalação (para diagnóstico)
+      ansible.builtin.debug:
+        var: ext
+
+    - name: Aguardar a extensão concluir antes de removê-la
+      ansible.builtin.pause:
+        seconds: 30
+
+    # ===== Remove a própria extensão de desinstalação (deixa a VM limpa) =====
+    - name: Remover a extensão desinstalar-httpd (limpeza final)
+      azure.azcollection.azure_rm_virtualmachineextension:
+        resource_group: "{{ resource_group }}"
+        virtual_machine_name: "{{ vm_name }}"
+        name: desinstalar-httpd
+        state: absent
+
+    - name: Confirmar
+      ansible.builtin.debug:
+        msg: "Apache2 desinstalado da VM '{{ vm_name }}' e extensões removidas."
