@@ -1,17 +1,17 @@
 ---
-- name: Instalar e configurar httpd (Apache) via SSM
+- name: Instalar e configurar Apache (httpd) na instância vinicius-ssm3
   hosts: vinicius-ssm3
   gather_facts: false
   become: true
 
   tasks:
 
-    - name: Atualizar todos os pacotes
+    - name: Atualizar todos os pacotes do sistema
       ansible.builtin.yum:
         name: "*"
         state: latest
 
-    - name: Instalar httpd
+    - name: Instalar o Apache (httpd)
       ansible.builtin.yum:
         name: httpd
         state: present
@@ -22,19 +22,27 @@
         state: started
         enabled: true
 
-    - name: Criar página de teste
+    - name: Criar página de teste do Apache
       ansible.builtin.copy:
-        content: "<h1>Apache instalado com sucesso via Ansible + SSM!</h1>"
+        content: |
+          <html>
+            <head><title>Apache no AWS</title></head>
+            <body>
+              <h1>Apache instalado com sucesso!</h1>
+              <p>Instância: vinicius-ssm3</p>
+              <p>Instalado via Ansible + SSM</p>
+            </body>
+          </html>
         dest: /var/www/html/index.html
         owner: apache
         group: apache
         mode: '0644'
 
-    - name: Mostrar status do httpd
-      ansible.builtin.command: systemctl status httpd
+    - name: Verificar status do httpd
+      ansible.builtin.command: systemctl is-active httpd
       register: httpd_status
       changed_when: false
 
-    - name: Exibir resultado
+    - name: Exibir status do serviço
       ansible.builtin.debug:
-        var: httpd_status.stdout_lines
+        msg: "Status do httpd: {{ httpd_status.stdout }}"
