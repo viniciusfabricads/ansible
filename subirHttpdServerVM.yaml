@@ -1,0 +1,40 @@
+---
+- name: Instalar e configurar httpd (Apache) via SSM
+  hosts: vinicius_ssm3
+  gather_facts: false
+  become: true
+
+  tasks:
+
+    - name: Atualizar todos os pacotes
+      ansible.builtin.yum:
+        name: "*"
+        state: latest
+
+    - name: Instalar httpd
+      ansible.builtin.yum:
+        name: httpd
+        state: present
+
+    - name: Iniciar e habilitar o serviço httpd
+      ansible.builtin.service:
+        name: httpd
+        state: started
+        enabled: true
+
+    - name: Criar página de teste
+      ansible.builtin.copy:
+        content: "<h1>Apache instalado com sucesso via Ansible + SSM!</h1>"
+        dest: /var/www/html/index.html
+        owner: apache
+        group: apache
+        mode: '0644'
+
+    - name: Mostrar status do httpd
+      ansible.builtin.command: systemctl status httpd
+      register: httpd_status
+      changed_when: false
+
+    - name: Exibir resultado
+      ansible.builtin.debug:
+        var: httpd_status.stdout_lines
