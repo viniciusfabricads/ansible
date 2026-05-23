@@ -1,9 +1,16 @@
 ---
-- name: Criar VPC, Subnet Pública e VM com suporte ao SSM Session Manager
+- name: Criar VPC, Subnet Pública e VM com SSH habilitado
   hosts: localhost
   gather_facts: false
   collections:
     - amazon.aws
+
+  vars:
+    region: us-east-2
+    key_name: vinicius-key            # nome do key pair na AWS
+    key_local_path: "./vinicius-key.pem"   # onde salvar a chave privada
+    # Para restringir o SSH ao seu IP, troque o valor abaixo por "SEU.IP.AQUI/32"
+    ssh_cidr: 0.0.0.0/0
 
   tasks:
 
@@ -32,7 +39,7 @@
       ec2_vpc_net:
         name: vinicius-vpc
         cidr_block: 10.0.0.0/16
-        region: us-east-2
+        region: "{{ region }}"
         state: present
         tags:
           Name: vinicius-vpc
@@ -42,7 +49,7 @@
     - name: Criar Internet Gateway
       ec2_vpc_igw:
         vpc_id: "{{ vpc.vpc.id }}"
-        region: us-east-2
+        region: "{{ region }}"
         state: present
         tags:
           Name: vinicius-igw
@@ -54,7 +61,7 @@
         vpc_id: "{{ vpc.vpc.id }}"
         cidr: 10.0.1.0/24
         az: us-east-2a
-        region: us-east-2
+        region: "{{ region }}"
         state: present
         tags:
           Name: vinicius-subnet-public
@@ -64,7 +71,7 @@
     - name: Criar Route Table
       ec2_vpc_route_table:
         vpc_id: "{{ vpc.vpc.id }}"
-        region: us-east-2
+        region: "{{ region }}"
         tags:
           Name: vinicius-rt-public
         routes:
@@ -74,10 +81,47 @@
           - "{{ subnet.subnet.id }}"
       register: route_table
 
+    # ========================== KEY PAIR (CHAVE SSH) ==========================
+    - name: Criar Key Pair para acesso SSH
+      amazon.aws.ec2_key:
+        name: "{{ key_name }}"
+        region: "{{ region }}"
+        state: present
+      register: keypair
+
+    - name: Salvar a chave privada localmente (somente quando recém-criada)
+      ansible.builtin.copy:
+        content: "{{ keypair.key.private_key }}"
+        dest: "{{ key_local_path }}"
+        mode: '0400'
+      when: keypair.key.private_key is defined
+
+    # ========================== SECURITY GROUP (SSH + HTTP) ==========================
+    - name: Criar Security Group liberando SSH (22) e HTTP (80)
+      amazon.aws.ec2_security_group:
+        name: vinicius-sg-ssh-http
+        description: Libera SSH e HTTP para a VM
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            ports:
+              - 22
+            cidr_ip: "{{ ssh_cidr }}"
+            rule_desc: Permite SSH
+          - proto: tcp
+            ports:
+              - 80
+            cidr_ip: 0.0.0.0/0
+            rule_desc: Permite HTTP de qualquer origem
+        tags:
+          Name: vinicius-sg-ssh-http
+      register: sg
+
     # ========================== BUSCAR AMI ==========================
     - name: Buscar AMI Amazon Linux 2 mais recente
       ec2_ami_info:
-        region: us-east-2
+        region: "{{ region }}"
         owners: ["amazon"]
         filters:
           name: "amzn2-ami-hvm-*-x86_64-gp2"
@@ -91,22 +135,27 @@
         latest_al2_ami_id: "{{ (al2_amis.images | sort(attribute='creation_date', reverse=true))[0].image_id }}"
 
     # ========================== CRIAR INSTÂNCIA ==========================
-    - name: Criar Instância EC2 com IP Público e IAM Role SSM
+    - name: Criar Instância EC2 com IP Público, SSH e IAM Role SSM
       ec2_instance:
-        name: vinicius-ssm3
+        name: vinicius-ssm4
         image_id: "{{ latest_al2_ami_id }}"
         instance_type: t2.micro
-        region: us-east-2
+        region: "{{ region }}"
         vpc_subnet_id: "{{ subnet.subnet.id }}"
+        key_name: "{{ key_name }}"
+        security_groups:
+          - "{{ sg.group_id }}"
         state: present
         tags:
-          Name: vinicius-ssm3
+          Name: vinicius-ssm4
           Environment: Demo
         iam_instance_profile: SSMInstanceRole
         wait: true
         network_interfaces:
           - assign_public_ip: true
             delete_on_termination: true
+            groups:
+              - "{{ sg.group_id }}"
       register: ec2
 
     - name: Mostrar resumo
@@ -116,5 +165,8 @@
           - "VPC ID: {{ vpc.vpc.id }}"
           - "Subnet ID: {{ subnet.subnet.id }}"
           - "Internet Gateway ID: {{ igw.gateway_id }}"
+          - "Security Group ID: {{ sg.group_id }}"
+          - "Key Pair: {{ key_name }} (chave salva em {{ key_local_path }})"
           - "Instância ID: {{ ec2.instances[0].instance_id }}"
           - "IP Público: {{ ec2.instances[0].public_ip_address | default('N/A') }}"
+          - "Conectar via: ssh -i {{ key_local_path }} ec2-user@{{ ec2.instances[0].public_ip_address | default('N/A') }}"
