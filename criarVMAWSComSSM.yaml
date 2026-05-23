@@ -90,26 +90,26 @@
       set_fact:
         latest_al2_ami_id: "{{ (al2_amis.images | sort(attribute='creation_date', reverse=true))[0].image_id }}"
 
-    # ========================== CRIAR INSTÂNCIA COM IP PÚBLICO ==========================
+    # ========================== CRIAR INSTÂNCIA ==========================
     - name: Criar Instância EC2 com IP Público e IAM Role SSM
       ec2_instance:
-        name: vinicius-ssm1
+        name: vinicius-ssm3
         image_id: "{{ latest_al2_ami_id }}"
         instance_type: t2.micro
         region: us-east-2
+        vpc_subnet_id: "{{ subnet.subnet.id }}"
         state: present
         tags:
-          Name: vinicius-ssm1
+          Name: vinicius-ssm3
           Environment: Demo
         iam_instance_profile: SSMInstanceRole
         wait: true
         network_interfaces:
-          - subnet_id: "{{ subnet.subnet.id }}"
-            assign_public_ip: true
+          - assign_public_ip: true
             delete_on_termination: true
       register: ec2
 
-    - name: Mostrar resumo do que foi criado
+    - name: Mostrar resumo
       debug:
         msg:
           - "AMI utilizada: {{ latest_al2_ami_id }}"
