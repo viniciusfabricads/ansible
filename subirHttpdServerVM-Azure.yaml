@@ -1,0 +1,65 @@
+---
+# ============================================================================
+# Playbook: Instalar e iniciar o Apache2 (httpd) na VM Ubuntu do Azure
+# Conexão: API do Azure via Custom Script Extension (sem SSH, sem chave).
+#          Equivalente ao SSM Run Command da AWS — executa o script DENTRO
+#          da VM, sem abrir conexão a partir do AWX.
+#
+# Mesmas credenciais/EE da criação (Azure Credential no AWX).
+# ============================================================================
+
+- name: Instalar Apache2 na VM Ubuntu do Azure via Custom Script Extension
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - azure.azcollection
+
+  vars:
+    resource_group: vinicius-rg
+    vm_name: vinicius-vm
+    public_ip_name: vinicius-pip
+
+  tasks:
+
+    # ===== Garante a biblioteca Python faltante no EE (igual à criação) =====
+    - name: Garantir a biblioteca azure-mgmt-hybridcompute
+      ansible.builtin.pip:
+        name: azure-mgmt-hybridcompute
+        extra_args: --user
+      ignore_errors: true
+
+    # ===== Instala e sobe o Apache2 dentro da VM via extensão =====
+    - name: Instalar e iniciar o Apache2 via Custom Script Extension
+      azure.azcollection.azure_rm_virtualmachineextension:
+        resource_group: "{{ resource_group }}"
+        virtual_machine_name: "{{ vm_name }}"
+        name: instalar-httpd
+        publisher: Microsoft.Azure.Extensions
+        virtual_machine_extension_type: CustomScript
+        type_handler_version: "2.1"
+        auto_upgrade_minor_version: true
+        settings:
+          commandToExecute: >-
+            sudo apt-get update &&
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y apache2 &&
+            echo '<html><head><title>vinicius-vm</title></head>
+            <body><h1>Apache2 instalado via Ansible + Azure Custom Script Extension</h1>
+            <p>Servidor: vinicius-vm</p></body></html>'
+            | sudo tee /var/www/html/index.html &&
+            sudo systemctl enable apache2 &&
+            sudo systemctl start apache2
+        state: present
+      register: ext
+
+    # ===== Busca o IP público para exibir o endereço de acesso =====
+    - name: Buscar o IP público da VM
+      azure.azcollection.azure_rm_publicipaddress_info:
+        resource_group: "{{ resource_group }}"
+        name: "{{ public_ip_name }}"
+      register: pip_info
+
+    - name: Mostrar resultado
+      ansible.builtin.debug:
+        msg:
+          - "Extensão aplicada: {{ ext.state.provisioning_state | default('ver console') }}"
+          - "Acesse: http://{{ pip_info.publicipaddresses[0].ip_address | default('N/A') }}"
