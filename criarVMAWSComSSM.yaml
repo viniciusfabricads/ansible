@@ -1,0 +1,92 @@
+---
+- name: Criar VPC, Subnet e VM com suporte ao SSM Session Manager
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - amazon.aws
+
+  tasks:
+
+    # ========================== IAM ROLE PARA SSM ==========================
+    - name: Criar IAM Role para SSM
+      iam_role:
+        name: SSMInstanceRole
+        assume_role_policy_document: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": { "Service": "ec2.amazonaws.com" },
+                "Action": "sts:AssumeRole"
+              }
+            ]
+          }
+        state: present
+        create_instance_profile: true
+        managed_policies:
+          - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      register: ssm_role
+
+    # ========================== VPC ==========================
+    - name: Criar VPC
+      ec2_vpc_net:
+        name: vinicius-vpc
+        cidr_block: 10.0.0.0/16
+        region: us-east-2
+        state: present
+        tags:
+          Name: vinicius-vpc
+      register: vpc
+
+    - name: Criar Subnet
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc.vpc.id }}"
+        cidr: 10.0.1.0/24
+        az: us-east-2a
+        region: us-east-2
+        state: present
+        tags:
+          Name: vinicius-subnet
+      register: subnet
+
+    # ========================== BUSCAR AMI ==========================
+    - name: Buscar AMI mais recente do Amazon Linux 2
+      ec2_ami_info:
+        region: us-east-2
+        owners: ["amazon"]
+        filters:
+          name: "amzn2-ami-hvm-*-x86_64-gp2"
+          architecture: "x86_64"
+          root-device-type: "ebs"
+          virtualization-type: "hvm"
+      register: al2_amis
+
+    - name: Definir AMI mais recente
+      set_fact:
+        latest_al2_ami_id: "{{ (al2_amis.images | sort(attribute='creation_date', reverse=true))[0].image_id }}"
+
+    # ========================== CRIAR INSTÂNCIA ==========================
+    - name: Criar Instância EC2 com IAM Role para SSM
+      ec2_instance:
+        name: vinicius-ssm
+        image_id: "{{ latest_al2_ami_id }}"
+        instance_type: t2.micro
+        region: us-east-2
+        vpc_subnet_id: "{{ subnet.subnet.id }}"
+        state: present
+        tags:
+          Name: vinicius-ssm
+          Environment: Demo
+        iam_instance_profile: SSMInstanceRole          # ← ESSENCIAL para SSM
+        wait: true
+      register: ec2
+
+    - name: Mostrar informações criadas
+      debug:
+        msg:
+          - "AMI utilizada: {{ latest_al2_ami_id }}"
+          - "VPC ID: {{ vpc.vpc.id }}"
+          - "Subnet ID: {{ subnet.subnet.id }}"
+          - "Instância ID: {{ ec2.instances[0].instance_id }}"
+          - "IAM Role: SSMInstanceRole"
