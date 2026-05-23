@@ -3,6 +3,8 @@
   hosts: vinicius-ssm3
   gather_facts: false
   become: true
+  collections:
+    - community.aws
 
   tasks:
 
