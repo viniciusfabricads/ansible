@@ -93,18 +93,20 @@
     # ========================== CRIAR INSTÂNCIA COM IP PÚBLICO ==========================
     - name: Criar Instância EC2 com IP Público e IAM Role SSM
       ec2_instance:
-        name: vinicius-ssm2
+        name: vinicius-ssm1
         image_id: "{{ latest_al2_ami_id }}"
         instance_type: t2.micro
         region: us-east-2
-        vpc_subnet_id: "{{ subnet.subnet.id }}"
-        assign_public_ip: true                    # ← IP Público automático
         state: present
         tags:
-          Name: vinicius-ssm2
+          Name: vinicius-ssm1
           Environment: Demo
         iam_instance_profile: SSMInstanceRole
         wait: true
+        network_interfaces:
+          - subnet_id: "{{ subnet.subnet.id }}"
+            assign_public_ip: true
+            delete_on_termination: true
       register: ec2
 
     - name: Mostrar resumo do que foi criado
