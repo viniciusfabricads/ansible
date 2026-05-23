@@ -7,7 +7,7 @@
 # Não depende de arquivos persistentes nem de Credentials de SSH.
 #
 # Pré-requisitos no Execution Environment do AWX:
-#   - collection community.aws e amazon.aws
+#   - collection amazon.aws
 #   - boto3 / botocore (já presentes, pois os módulos AWS funcionam)
 #   - AWS Credential configurado no Job Template (chave de acesso ou role)
 #
@@ -21,7 +21,6 @@
   gather_facts: false
   collections:
     - amazon.aws
-    - community.aws
   vars:
     region: us-east-2
     instance_id: i-0e26cae7240dbd2bb        # vinicius-ssm4
@@ -69,26 +68,68 @@
       vars:
         existing_sgs: "{{ instance_info.instances[0].security_groups | map(attribute='group_id') | list }}"
 
-    # ---- Instala o HTTPD enviando comandos via SSM Run Command ----
-    - name: Enviar comando de instalação do HTTPD via SSM
-      community.aws.ssm_command:
-        document_name: AWS-RunShellScript
-        region: "{{ region }}"
-        instance_ids:
-          - "{{ instance_id }}"
-        comment: "Instalar e subir o HTTPD via Ansible"
-        parameters:
-          commands:
-            - "yum install -y httpd"
-            - "echo '<html><head><title>vinicius-ssm4</title></head><body><h1>HTTPD instalado via Ansible + SSM Run Command</h1><p>Servidor: vinicius-ssm4</p></body></html>' > /var/www/html/index.html"
-            - "systemctl enable httpd"
-            - "systemctl start httpd"
-        wait: true
-      register: ssm_result
+    # ---- Instala o HTTPD via SSM Run Command, chamando boto3 diretamente ----
+    # Não usa módulo especializado nem CLI: gera um script Python que usa o
+    # boto3 já presente no Execution Environment e o executa no localhost.
+    - name: Gerar script Python que dispara o SSM Run Command
+      ansible.builtin.copy:
+        dest: /tmp/ssm_run_httpd.py
+        mode: '0755'
+        content: |
+          import sys, time, boto3
 
-    - name: Mostrar resultado da execução
+          region = "{{ region }}"
+          instance_id = "{{ instance_id }}"
+
+          ssm = boto3.client("ssm", region_name=region)
+
+          commands = [
+              "yum install -y httpd",
+              "echo '<html><head><title>vinicius-ssm4</title></head>"
+              "<body><h1>HTTPD instalado via Ansible + SSM Run Command</h1>"
+              "<p>Servidor: vinicius-ssm4</p></body></html>' > /var/www/html/index.html",
+              "systemctl enable httpd",
+              "systemctl start httpd",
+          ]
+
+          resp = ssm.send_command(
+              InstanceIds=[instance_id],
+              DocumentName="AWS-RunShellScript",
+              Comment="Instalar e subir o HTTPD via Ansible",
+              Parameters={"commands": commands},
+          )
+          command_id = resp["Command"]["CommandId"]
+          print("CommandId:", command_id)
+
+          # Aguarda a conclusão
+          for _ in range(30):
+              time.sleep(5)
+              inv = ssm.get_command_invocation(
+                  CommandId=command_id, InstanceId=instance_id
+              )
+              status = inv["Status"]
+              print("Status:", status)
+              if status in ("Success", "Failed", "Cancelled", "TimedOut"):
+                  print("---- STDOUT ----")
+                  print(inv.get("StandardOutputContent", ""))
+                  print("---- STDERR ----")
+                  print(inv.get("StandardErrorContent", ""))
+                  if status != "Success":
+                      sys.exit(1)
+                  break
+          else:
+              print("Tempo esgotado aguardando o comando.")
+              sys.exit(1)
+
+    - name: Executar o script (usa o boto3 do Execution Environment)
+      ansible.builtin.command: "{{ ansible_python_interpreter | default('python3') }} /tmp/ssm_run_httpd.py"
+      register: ssm_result
+      changed_when: true
+
+    - name: Mostrar saída do Run Command
       ansible.builtin.debug:
-        msg:
-          - "Status: {{ ssm_result.command.status | default('ver detalhes abaixo') }}"
-          - "IP Público: {{ instance_info.instances[0].public_ip_address | default('N/A') }}"
-          - "Acesse: http://{{ instance_info.instances[0].public_ip_address | default('N/A') }}"
+        var: ssm_result.stdout_lines
+
+    - name: Mostrar como acessar
+      ansible.builtin.debug:
+        msg: "Acesse: http://{{ instance_info.instances[0].public_ip_address | default('N/A') }}"
