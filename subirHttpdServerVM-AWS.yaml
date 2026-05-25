@@ -58,12 +58,28 @@
 - name: Instalar e configurar Apache HTTPD
   hosts: webservers
   become: true
-  gather_facts: true
+  # gather_facts desligado: o Python 3.7 padrao do Amazon Linux 2 nao atende
+  # ao minimo exigido pelo ansible-core (3.8+). Instalamos um Python compativel
+  # antes de coletar facts.
+  gather_facts: false
 
   vars:
     site_message: "Apache HTTPD provisionado via Red Hat Ansible Automation Platform"
 
   tasks:
+    # ---- Preparar um Python compativel (Amazon Linux 2 traz apenas 3.7) ----
+    # O modulo 'raw' roda comando bruto via SSH, sem depender de Python no alvo.
+    - name: Instalar Python 3.8 via Amazon Linux Extras
+      ansible.builtin.raw: amazon-linux-extras install -y python3.8
+      changed_when: false
+
+    - name: Apontar o Ansible para o Python 3.8 recem-instalado
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: /usr/bin/python3.8
+
+    - name: Coletar facts agora com o Python compativel
+      ansible.builtin.setup:
+
     - name: Instalar o pacote httpd
       ansible.builtin.yum:
         name: httpd
