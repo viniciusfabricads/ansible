@@ -1,6 +1,11 @@
 ---
 # ==========================================================================
 # PLAY 1 - Descobrir a VM criada e adicioná-la ao inventário dinamicamente
+# --------------------------------------------------------------------------
+# Pré-requisitos no Job Template (Automation Controller / versão web):
+#   - Credential AWS         -> autentica o play 1 na AWS (ec2_instance_info)
+#   - Credential Machine     -> fornece usuário (ec2-user) + chave SSH ao play 2
+# Não há nenhuma referência a arquivo .pem: a plataforma injeta tudo.
 # ==========================================================================
 - name: Localizar a instância EC2 e montar inventário em runtime
   hosts: localhost
@@ -10,9 +15,7 @@
 
   vars:
     region: us-east-2
-    instance_name: vinicius-ssm4          # mesma tag Name usada no playbook de criação
-    key_local_path: "./vinicius-key.pem"  # chave privada salva pelo playbook de criação
-    remote_user: ec2-user                 # usuário padrão do Amazon Linux 2
+    instance_name: vinicius-ssm4   # mesma tag Name usada no playbook de criação
 
   tasks:
     - name: Buscar a instância em execução pela tag Name
@@ -34,8 +37,8 @@
       ansible.builtin.add_host:
         name: "{{ ec2_info.instances[0].public_ip_address }}"
         groups: webservers
-        ansible_user: "{{ remote_user }}"
-        ansible_ssh_private_key_file: "{{ key_local_path }}"
+        # Usuário e chave SSH vêm da Machine Credential do Job Template.
+        # StrictHostKeyChecking desabilitado porque a VM é recém-criada.
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
 
     - name: Aguardar a porta 22 (SSH) ficar acessível
