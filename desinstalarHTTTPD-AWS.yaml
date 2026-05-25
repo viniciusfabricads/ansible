@@ -1,0 +1,124 @@
+---
+# ==========================================================================
+# PLAY 1 - Descobrir a VM e adicioná-la ao inventário dinamicamente
+# (idêntico ao playbook de instalação; usa a AWS Credential do Job Template)
+# ==========================================================================
+- name: Localizar a instância EC2 e montar inventário em runtime
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - amazon.aws
+
+  vars:
+    region: us-east-2
+    instance_name: vinicius-ssm4
+
+  tasks:
+    - name: Buscar a instância em execução pela tag Name
+      amazon.aws.ec2_instance_info:
+        region: "{{ region }}"
+        filters:
+          "tag:Name": "{{ instance_name }}"
+          instance-state-name: ["running"]
+      register: ec2_info
+
+    - name: Falhar de forma clara se nenhuma instância for encontrada
+      ansible.builtin.fail:
+        msg: >-
+          Nenhuma instância em execução com a tag Name={{ instance_name }}
+          foi encontrada na região {{ region }}.
+      when: ec2_info.instances | length == 0
+
+    - name: Adicionar a VM ao inventário em tempo de execução
+      ansible.builtin.add_host:
+        name: "{{ ec2_info.instances[0].public_ip_address }}"
+        groups: webservers
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+    - name: Aguardar a porta 22 (SSH) ficar acessível
+      ansible.builtin.wait_for:
+        host: "{{ ec2_info.instances[0].public_ip_address }}"
+        port: 22
+        timeout: 300
+        state: started
+
+    - name: Mostrar o alvo identificado
+      ansible.builtin.debug:
+        msg: "VM alvo: {{ ec2_info.instances[0].public_ip_address }} ({{ instance_name }})"
+
+# ==========================================================================
+# PLAY 2 - Parar e desinstalar o Apache HTTPD
+# ==========================================================================
+- name: Desinstalar o Apache HTTPD
+  hosts: webservers
+  become: true
+  # Mesmo tratamento do playbook de instalação: o Python 3.7 padrao do
+  # Amazon Linux 2 nao atende ao ansible-core (3.8+). Preparamos o 3.8 e
+  # usamos chamadas diretas ao yum/systemctl para evitar conflito de backend.
+  gather_facts: false
+
+  vars:
+    remover_pagina: true   # true -> remove tambem a index.html de teste
+
+  tasks:
+    # ---- Preparar Python compativel (mesma necessidade da instalacao) ----
+    - name: Garantir Python 3.8 via Amazon Linux Extras
+      ansible.builtin.raw: amazon-linux-extras install -y python3.8
+      changed_when: false
+
+    - name: Apontar o Ansible para o Python 3.8
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: /usr/bin/python3.8
+
+    - name: Coletar facts com o Python compativel
+      ansible.builtin.setup:
+
+    # ---- Verificar se o httpd esta instalado ----
+    - name: Checar se o pacote httpd existe
+      ansible.builtin.command: rpm -q httpd
+      register: httpd_check
+      changed_when: false
+      failed_when: false
+
+    - name: Informar se o httpd nem estava instalado
+      ansible.builtin.debug:
+        msg: "O pacote httpd nao esta instalado nesta VM. Nada a desinstalar."
+      when: httpd_check.rc != 0
+
+    # ---- Parar e desabilitar o servico (somente se instalado) ----
+    - name: Parar e desabilitar o servico httpd (systemctl direto)
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - systemctl stop httpd
+        - systemctl disable httpd
+      changed_when: false
+      failed_when: false
+      when: httpd_check.rc == 0
+
+    # ---- Desinstalar o pacote (chamada direta ao yum) ----
+    - name: Desinstalar o pacote httpd
+      ansible.builtin.command: yum remove -y httpd
+      register: yum_remove
+      changed_when: "'No Packages' not in yum_remove.stdout"
+      when: httpd_check.rc == 0
+
+    # ---- Remover a pagina de teste (opcional) ----
+    - name: Remover a pagina index.html de teste
+      ansible.builtin.file:
+        path: /var/www/html/index.html
+        state: absent
+      when: remover_pagina | bool
+
+    # ---- Confirmar a remocao ----
+    - name: Confirmar que o httpd foi removido
+      ansible.builtin.command: rpm -q httpd
+      register: httpd_recheck
+      changed_when: false
+      failed_when: false
+
+    - name: Resumo final
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "{{ 'Apache HTTPD removido com sucesso.' if httpd_recheck.rc != 0 else 'ATENCAO: httpd ainda presente, verifique manualmente.' }}"
+          - "Pagina de teste removida: {{ remover_pagina }}"
