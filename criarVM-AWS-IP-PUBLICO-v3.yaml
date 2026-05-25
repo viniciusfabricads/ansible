@@ -160,11 +160,26 @@
       register: ec2
 
     # ========================== EXIBIR A CHAVE PRIVADA NO OUTPUT ==========================
-    # Copie o bloco abaixo (do -----BEGIN ao -----END, inclusive) e cole no campo
+    # Dupla garantia contra truncamento:
+    #   (1) debug: var          -> preserva o conteudo bruto melhor que debug: msg
+    #   (2) set_stats           -> expoe a chave na aba "Artifacts" do job, fora do log
+    # Copie o bloco do -----BEGIN ao -----END (inclusive) para o campo
     # "SSH Private Key" de uma Machine Credential no Automation Controller.
+    - name: Guardar a chave privada em um fato
+      ansible.builtin.set_fact:
+        ssh_private_key: "{{ keypair.key.private_key }}"
+      when: keypair.key.private_key is defined
+
     - name: ">>> CHAVE PRIVADA SSH - copie para a Machine Credential <<<"
       ansible.builtin.debug:
-        msg: "{{ keypair.key.private_key }}"
+        var: ssh_private_key
+      when: keypair.key.private_key is defined
+
+    - name: Expor a chave tambem como artefato do job (aba Artifacts)
+      ansible.builtin.set_stats:
+        data:
+          ssh_private_key: "{{ keypair.key.private_key }}"
+        per_host: false
       when: keypair.key.private_key is defined
 
     - name: Aviso caso a chave não tenha sido gerada
